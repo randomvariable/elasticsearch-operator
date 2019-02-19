@@ -395,16 +395,16 @@ func processDeploymentType(deploymentType string, clusterName string) (string, s
 	return deploymentName, role, isNodeMaster, isNodeData
 }
 
-func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, storageClass, dataDiskSize, javaOptions, serviceAccountName,
-	statsdEndpoint, networkHost string, replicas *int32, useSSL *bool, resources myspec.Resources, imagePullSecrets []myspec.ImagePullSecrets, imagePullPolicy string) *apps.StatefulSet {
+func buildStatefulSet(statefulSetName string, deploymentType string, replicas *int32, baseImage string, storageClass string, c *myspec.ElasticsearchCluster) *apps.StatefulSet {
 
-	_, role, isNodeMaster, isNodeData := processDeploymentType(deploymentType, clusterName)
+	// deploymentType, statefulSetName, replicas, baseImage, c
+	_, role, isNodeMaster, isNodeData := processDeploymentType(deploymentType, c.Name)
 
-	volumeSize, _ := resource.ParseQuantity(dataDiskSize)
+	volumeSize, _ := resource.ParseQuantity(c.Spec.DataDiskSize)
 
 	enableSSL := "true"
 	scheme := v1.URISchemeHTTPS
-	if useSSL != nil && !*useSSL {
+	if c.Spec.UseSSL != nil && !*c.Spec.UseSSL {
 		enableSSL = "false"
 		scheme = v1.URISchemeHTTP
 	}
@@ -412,8 +412,8 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 	// Parse CPU / Memory
 	// limitCPU, _ := resource.ParseQuantity(resources.Limits.CPU)
 	// limitMemory, _ := resource.ParseQuantity(resources.Limits.Memory)
-	requestCPU, _ := resource.ParseQuantity(resources.Requests.CPU)
-	requestMemory, _ := resource.ParseQuantity(resources.Requests.Memory)
+	requestCPU, _ := resource.ParseQuantity(c.Spec.Resources.Requests.CPU)
+	requestMemory, _ := resource.ParseQuantity(c.Spec.Resources.Requests.Memory)
 
 	readinessProbe := &v1.Probe{
 		TimeoutSeconds:      30,
@@ -439,8 +439,8 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 		},
 	}
 
-	component := fmt.Sprintf("elasticsearch-%s", clusterName)
-	discoveryServiceNameCluster := fmt.Sprintf("%s-%s", discoveryServiceName, clusterName)
+	component := fmt.Sprintf("elasticsearch-%s", c.Name)
+	discoveryServiceNameCluster := fmt.Sprintf("%s-%s", discoveryServiceName, c.Name)
 
 	statefulSet := &apps.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -449,7 +449,7 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 				"component": component,
 				"role":      role,
 				"name":      statefulSetName,
-				"cluster":   clusterName,
+				"cluster":   c.Name,
 			},
 		},
 		Spec: apps.StatefulSetSpec{
@@ -460,7 +460,7 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 					"component": component,
 					"role":      role,
 					"name":      statefulSetName,
-					"cluster":   clusterName,
+					"cluster":   c.Name,
 				},
 			},
 			Template: v1.PodTemplateSpec{
@@ -469,7 +469,7 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 						"component": component,
 						"role":      role,
 						"name":      statefulSetName,
-						"cluster":   clusterName,
+						"cluster":   c.Name,
 					},
 				},
 				Spec: v1.PodSpec{
@@ -497,15 +497,16 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 						v1.Container{
 							Name: statefulSetName,
 							SecurityContext: &v1.SecurityContext{
-								Privileged: &[]bool{true}[0],
+								Privileged: &[]bool{false}[0],
 								Capabilities: &v1.Capabilities{
 									Add: []v1.Capability{
 										"IPC_LOCK",
+										"SYS_RESOURCE",
 									},
 								},
 							},
 							Image:           baseImage,
-							ImagePullPolicy: v1.PullPolicy(imagePullPolicy),
+							ImagePullPolicy: v1.PullPolicy(c.Spec.ImagePullPolicy),
 							Env: []v1.EnvVar{
 								v1.EnvVar{
 									Name: "NAMESPACE",
@@ -517,7 +518,7 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 								},
 								v1.EnvVar{
 									Name:  "CLUSTER_NAME",
-									Value: clusterName,
+									Value: c.Name,
 								},
 								v1.EnvVar{
 									Name:  "NODE_MASTER",
@@ -541,11 +542,11 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 								},
 								v1.EnvVar{
 									Name:  "ES_JAVA_OPTS",
-									Value: javaOptions,
+									Value: c.Spec.JavaOptions,
 								},
 								v1.EnvVar{
 									Name:  "STATSD_HOST",
-									Value: statsdEndpoint,
+									Value: c.Spec.Instrumentation.StatsdHost,
 								},
 								v1.EnvVar{
 									Name:  "DISCOVERY_SERVICE",
@@ -553,7 +554,7 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 								},
 								v1.EnvVar{
 									Name:  "NETWORK_HOST",
-									Value: networkHost,
+									Value: c.Spec.NetworkHost,
 								},
 							},
 							Ports: []v1.ContainerPort{
@@ -589,7 +590,7 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 						},
 					},
 					Volumes:          []v1.Volume{},
-					ImagePullSecrets: TemplateImagePullSecrets(imagePullSecrets),
+					ImagePullSecrets: TemplateImagePullSecrets(c.Spec.ImagePullSecrets),
 				},
 			},
 			VolumeClaimTemplates: []v1.PersistentVolumeClaim{
@@ -600,7 +601,7 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 							"component": "elasticsearch",
 							"role":      role,
 							"name":      statefulSetName,
-							"cluster":   clusterName,
+							"cluster":   c.Name,
 						},
 					},
 					Spec: v1.PersistentVolumeClaimSpec{
@@ -618,9 +619,23 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 		},
 	}
 
-	clusterSecretName := fmt.Sprintf("%s-%s", secretName, clusterName)
+	if c.Spec.ElasticSearch != nil {
+		if c.Spec.ElasticSearch.Command != nil {
+			statefulSet.Spec.Template.Spec.Containers[0].Command = *c.Spec.ElasticSearch.Command
+		}
 
-	if *useSSL {
+		if c.Spec.ElasticSearch.Args != nil {
+			statefulSet.Spec.Template.Spec.Containers[0].Args = *c.Spec.ElasticSearch.Args
+		}
+
+		if c.Spec.ElasticSearch.RunAsUser != nil {
+			statefulSet.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser = c.Spec.ElasticSearch.RunAsUser
+		}
+	}
+
+	clusterSecretName := fmt.Sprintf("%s-%s", secretName, c.Name)
+
+	if *c.Spec.UseSSL {
 		// Certs volume
 		statefulSet.Spec.Template.Spec.Volumes = append(statefulSet.Spec.Template.Spec.Volumes, v1.Volume{
 			Name: clusterSecretName,
@@ -638,8 +653,8 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 			})
 	}
 
-	if serviceAccountName != "" {
-		statefulSet.Spec.Template.Spec.ServiceAccountName = serviceAccountName
+	if c.Spec.ServiceAccountName != "" {
+		statefulSet.Spec.Template.Spec.ServiceAccountName = c.Spec.ServiceAccountName
 	}
 
 	if storageClass != "default" {
@@ -652,24 +667,23 @@ func buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, s
 }
 
 // CreateDataNodeDeployment creates the data node deployment
-func (k *K8sutil) CreateDataNodeDeployment(deploymentType string, replicas *int32, baseImage, storageClass string, dataDiskSize string, resources myspec.Resources,
-	imagePullSecrets []myspec.ImagePullSecrets, imagePullPolicy, serviceAccountName, clusterName, statsdEndpoint, networkHost, namespace, javaOptions string, useSSL *bool, esUrl string) error {
+func (k *K8sutil) CreateDataNodeDeployment(deploymentType string, replicas *int32, baseImage string, storageClass string, c *myspec.ElasticsearchCluster) error {
 
-	deploymentName, _, _, _ := processDeploymentType(deploymentType, clusterName)
+	deploymentName, _, _, _ := processDeploymentType(deploymentType, c.Name)
 
 	statefulSetName := fmt.Sprintf("%s-%s", deploymentName, storageClass)
 
 	// Check if StatefulSet exists
-	statefulSet, err := k.Kclient.AppsV1beta2().StatefulSets(namespace).Get(statefulSetName, metav1.GetOptions{})
+	statefulSet, err := k.Kclient.AppsV1beta2().StatefulSets(c.Namespace).Get(statefulSetName, metav1.GetOptions{})
 
 	if len(statefulSet.Name) == 0 {
 
 		logrus.Infof("StatefulSet %s not found, creating...", statefulSetName)
 
-		statefulSet := buildStatefulSet(statefulSetName, clusterName, deploymentType, baseImage, storageClass, dataDiskSize, javaOptions, serviceAccountName,
-			statsdEndpoint, networkHost, replicas, useSSL, resources, imagePullSecrets, imagePullPolicy)
+		// statefulSetName string, deploymentType string, replicas *int32, baseImage string, storageClass string,
+		statefulSet := buildStatefulSet(statefulSetName, deploymentType, replicas, baseImage, storageClass, c)
 
-		if _, err := k.Kclient.AppsV1beta2().StatefulSets(namespace).Create(statefulSet); err != nil {
+		if _, err := k.Kclient.AppsV1beta2().StatefulSets(c.Namespace).Create(statefulSet); err != nil {
 			logrus.Error("Could not create stateful set: ", err)
 			return err
 		}
@@ -685,16 +699,16 @@ func (k *K8sutil) CreateDataNodeDeployment(deploymentType string, replicas *int3
 			if *replicas < currentReplicas {
 				minMasterNodes := elasticsearchutil.MinMasterNodes(int(*replicas))
 				logrus.Infof("Detected master scale-down. Setting 'discovery.zen.minimum_master_nodes' to %d", minMasterNodes)
-				elasticsearchutil.UpdateDiscoveryMinMasterNodes(esUrl, minMasterNodes)
+				elasticsearchutil.UpdateDiscoveryMinMasterNodes(c.Spec.Scheduler.ElasticURL, minMasterNodes)
 			}
 			statefulSet.Spec.Replicas = replicas
-			_, err := k.Kclient.AppsV1beta2().StatefulSets(namespace).Update(statefulSet)
+			_, err := k.Kclient.AppsV1beta2().StatefulSets(c.Namespace).Update(statefulSet)
 
 			if err != nil {
 				logrus.Error("Could not scale statefulSet: ", err)
 				minMasterNodes := elasticsearchutil.MinMasterNodes(int(currentReplicas))
 				logrus.Infof("Setting 'discovery.zen.minimum_master_nodes' to %d", minMasterNodes)
-				elasticsearchutil.UpdateDiscoveryMinMasterNodes(esUrl, minMasterNodes)
+				elasticsearchutil.UpdateDiscoveryMinMasterNodes(c.Spec.Scheduler.ElasticURL, minMasterNodes)
 				return err
 			}
 		}

@@ -112,6 +112,7 @@ func (k *K8sutil) CreateClientDeployment(baseImage string, replicas *int32, java
 	if useSSL != nil && *useSSL {
 		enableSSL = "true"
 	}
+	user := int64(1000)
 
 	if len(deployment.Name) == 0 {
 		logrus.Infof("Deployment %s not found, creating...", deploymentName)
@@ -164,13 +165,17 @@ func (k *K8sutil) CreateClientDeployment(baseImage string, replicas *int32, java
 							v1.Container{
 								Name: deploymentName,
 								SecurityContext: &v1.SecurityContext{
-									Privileged: &[]bool{true}[0],
+									Privileged: &[]bool{false}[0],
+									RunAsUser:  &user,
 									Capabilities: &v1.Capabilities{
 										Add: []v1.Capability{
 											"IPC_LOCK",
+											"SYS_RESOURCE",
 										},
 									},
 								},
+								Command:         []string{"sh", "-c"},
+								Args:            []string{"ulimit -n 65536 && elasticsearch"},
 								Image:           baseImage,
 								ImagePullPolicy: v1.PullPolicy(imagePullPolicy),
 								Env: []v1.EnvVar{

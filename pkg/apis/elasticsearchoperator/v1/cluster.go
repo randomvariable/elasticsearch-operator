@@ -118,6 +118,8 @@ type ClusterSpec struct {
 
 	Scheduler Scheduler
 
+	ElasticSearch *ElasticSearch `json:"elasticSearch,omitempty"`
+
 	//KeepSecretsOnDelete tells the operator to not delete secrets when a cluster is destroyed
 	KeepSecretsOnDelete bool `json:"keep-secrets-on-delete"`
 
@@ -234,6 +236,23 @@ type Cerebro struct {
 
 	// serviceAccount to use when running cerebro
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+}
+
+// ElasticSearch properties if wanting operator to deploy for user
+type ElasticSearch struct {
+	// Defines the image to use for deploying kibana
+	Image string `json:"image"`
+
+	// ImagePullPolicy specifies the image-pull-policy to use (optional)
+	ImagePullPolicy string `json:"image-pull-policy"`
+
+	// custom ElasticSearch entrypoint
+	Command *[]string `json:"command,omitempty"`
+
+	// custom ElasticSearch arguments
+	Args *[]string `json:"args,omitempty"`
+
+	RunAsUser *int64 `json:"runAsUser, omitempty"`
 }
 
 // Scheduler stores info about how to snapshot the cluster
